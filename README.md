@@ -340,7 +340,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### 🚀 Ready to Control Drones with Your Voice?
 
-[![Try it Now](https://img.shields.io/badge/TRY_IT_NOW-Online_Demo-8A2BE2?style=for-the-badge&logo=github)](https://yourusername.github.io/voice-controlled-drone)
+[![Try it Now](https://img.shields.io/badge/TRY_IT_NOW-Online_Demo-8A2BE2?style=for-the-badge&logo=github)](https://LABBISRIKANTHBABU.github.io/VoiceControlDrone)
 [![Documentation](https://img.shields.io/badge/📚-Full_Documentation-blue?style=for-the-badge)](docs/README.md)
 
 **Star ⭐ this repository if you find it useful!**
