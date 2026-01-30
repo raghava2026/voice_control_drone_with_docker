@@ -11,6 +11,7 @@
 <h3>🚁 Speak. Command. Fly. A revolutionary voice-controlled drone simulation system</h3>
 
 [![Watch Demo](https://img.shields.io/badge/🎬-Watch_Demo_Video-FF0000?style=for-the-badge&logo=youtube)](https://res.cloudinary.com/dnt5w44al/video/upload/v1766822735/V_C_D_Demo_Video__zumuri.mp4)
+[![GitHub stars](https://img.shields.io/github/stars/yourusername/voice-controlled-drone?style=social)](https://github.com/raghava2026/voice-control-drone/tree/main)
 [![GitHub stars](https://img.shields.io/github/stars/yourusername/voice-controlled-drone?style=social)](https://github.com/LABBISRIKANTHBABU/VoiceControlDrone)
 
 </div>
@@ -340,7 +341,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### 🚀 Ready to Control Drones with Your Voice?
 
-[![Try it Now](https://img.shields.io/badge/TRY_IT_NOW-Online_Demo-8A2BE2?style=for-the-badge&logo=github)](https://LABBISRIKANTHBABU.github.io/VoiceControlDrone)
+[![Try it Now](https://img.shields.io/badge/TRY_IT_NOW-Online_Demo-8A2BE2?style=for-the-badge&logo=github)](https://res.cloudinary.com/dnt5w44al/video/upload/v1766822735/V_C_D_Demo_Video__zumuri.mp4)
 [![Documentation](https://img.shields.io/badge/📚-Full_Documentation-blue?style=for-the-badge)](docs/README.md)
 
 **Star ⭐ this repository if you find it useful!**
