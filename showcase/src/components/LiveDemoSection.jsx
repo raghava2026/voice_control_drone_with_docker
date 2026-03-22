@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 
-const BACKEND = 'http://localhost:8002'
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8002'
 
 const DEMO_COMMANDS = [
     { cmd: 'Take off 10 meters', intent: 'TAKEOFF', value: 10 },

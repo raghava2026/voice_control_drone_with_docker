@@ -34,8 +34,20 @@ app.add_middleware(
 # -------------------------------------------------
 @app.on_event("startup")
 def startup_event():
-    print("🔗 Connecting to drone at udp:127.0.0.1:14550 ...")
-    drone_control.connect_drone("udp:127.0.0.1:14550")
+    import time
+    SITL_HOST = os.environ.get("SITL_HOST", "127.0.0.1")
+    conn = f"tcp:{SITL_HOST}:5770"
+    print(f"🔗 Connecting to drone at {conn} ...")
+    for attempt in range(15):
+        try:
+            drone_control.connect_drone(conn)
+            print("✅ Drone connected!")
+            return
+        except Exception as e:
+            print(f"⚠️  Attempt {attempt+1}/15 failed: {e} — retrying in 10s")
+            drone_control.vehicle = None
+            time.sleep(10)
+    print("❌ Could not connect — running in offline mode")
 
 # -------------------------------------------------
 # Helper: Read live telemetry from DroneKit vehicle
