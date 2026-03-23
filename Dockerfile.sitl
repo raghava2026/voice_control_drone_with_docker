@@ -1,0 +1,43 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    git python3 python3-pip python3-dev \
+    build-essential curl wget sudo \
+    lsb-release tzdata iproute2 net-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --upgrade pip && \
+    pip3 install future pexpect empy==3.3.4 pymavlink MAVProxy
+
+RUN git clone --recurse-submodules --depth=1 \
+    https://github.com/ArduPilot/ardupilot.git /ardupilot
+
+WORKDIR /ardupilot
+RUN git submodule update --init --recursive
+RUN Tools/environment_install/install-prereqs-ubuntu.sh -y || true
+RUN pip3 install future pexpect empy==3.3.4 pymavlink MAVProxy
+RUN ./waf configure --board sitl && ./waf copter
+
+WORKDIR /ardupilot/Tools/autotest
+
+EXPOSE 5760/tcp
+EXPOSE 5770/tcp
+EXPOSE 5780/tcp
+
+# ArduCopter on 5760, MAVProxy bridges:
+# 5770 → DroneKit (backend)
+# 5780 → QGroundControl (Windows TCP)
+CMD ["/bin/bash", "-c", "\
+    /ardupilot/build/sitl/bin/arducopter \
+    --model + \
+    --speedup 1 \
+    --defaults default_params/copter.parm \
+    --serial0 tcp:0 & \
+    sleep 8 && \
+    mavproxy.py \
+    --master tcp:127.0.0.1:5760 \
+    --out tcpin:0.0.0.0:5770 \
+    --out tcpin:0.0.0.0:5780 \
+    --non-interactive"]

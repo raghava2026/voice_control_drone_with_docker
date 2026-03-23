@@ -1,0 +1,35 @@
+FROM python:3.9-slim
+
+RUN apt-get update && apt-get install -y \
+    git build-essential portaudio19-dev \
+    python3-dev libsndfile1 ffmpeg curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY server.py drone_control.py drone_takeoff.py \
+     nlp_module.py commands_map.py stt_module.py \
+     speech.html mav.parm ./
+
+RUN pip install --upgrade pip && pip install \
+    future \
+    fastapi==0.103.2 \
+    uvicorn==0.23.2 \
+    dronekit==2.9.2 \
+    pymavlink==2.4.41 \
+    vosk==0.3.45 \
+    SpeechRecognition==3.10.0 \
+    python-multipart==0.0.6 \
+    requests==2.31.0 \
+    python-dotenv==1.0.0 \
+    websockets==11.0.3 \
+    numpy==1.26.4 \
+    psutil==5.9.8 \
+    spacy==3.7.4
+
+RUN pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl || \
+    pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl || \
+    python -m spacy download en_core_web_sm
+
+EXPOSE 8002
+CMD ["python", "server.py"]

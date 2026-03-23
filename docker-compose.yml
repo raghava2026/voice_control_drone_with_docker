@@ -1,0 +1,47 @@
+services:
+  sitl:
+    build:
+      context: .
+      dockerfile: Dockerfile.sitl
+    container_name: vcd_sitl
+    ports:
+      - "5760:5760"
+      - "5770:5770"
+      - "5780:5780"
+    networks:
+      - vcd_net
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: vcd_backend
+    ports:
+      - "8002:8002"
+    environment:
+      - SITL_HOST=sitl
+    depends_on:
+      - sitl
+    networks:
+      - vcd_net
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./showcase
+      dockerfile: Dockerfile.frontend
+    container_name: vcd_frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_BACKEND_URL=http://localhost:8002
+    depends_on:
+      - backend
+    networks:
+      - vcd_net
+    restart: unless-stopped
+
+networks:
+  vcd_net:
+    driver: bridge
