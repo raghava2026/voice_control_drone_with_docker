@@ -7,9 +7,9 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-COPY server.py drone_control.py drone_takeoff.py \
-     nlp_module.py commands_map.py stt_module.py \
-     speech.html mav.parm ./
+COPY server.py drone_control.py  \
+     nlp_module.py stt_module.py \
+     mav.parm ./
 
 RUN pip install --upgrade pip && pip install \
     future \
