@@ -7,8 +7,8 @@ const TECH = [
     { name: 'DroneKit', icon: '🔌', color: '#7c3aed' },
     { name: 'MAVLink', icon: '📡', color: '#f59e0b' },
     { name: 'ArduPilot SITL', icon: '🛩️', color: '#e11d48' },
-    { name: 'Vosk STT', icon: '🔇', color: '#00e5ff' },
-    { name: 'Whisper STT', icon: '🎙️', color: '#a78bfa' },
+
+    // { name: 'Whisper STT', icon: '🎙️', color: '#a78bfa' },
     { name: 'Uvicorn', icon: '🦄', color: '#8b5cf6' },
     { name: 'React + Vite', icon: '⚛️', color: '#10b981' },
 ]
@@ -94,17 +94,18 @@ export default function OverviewSection() {
                         </p>
                         <p style={{ fontSize: '1.05rem', color: 'var(--text-secondary)', lineHeight: 1.8, marginBottom: 32 }}>
                             Built by <strong style={{ color: '#a78bfa' }}>K. Raghavendra, L. Srikanth Babu &amp; V. Chandini</strong> — the system leverages
-                            a dual-mode STT pipeline (<strong style={{ color: '#a78bfa' }}>Vosk</strong> + <strong style={{ color: '#00e5ff' }}>Whisper</strong>), spaCy's
+                            a dual-mode STT pipeline
+                            (<strong style={{ color: '#00e5ff' }}>Whisper</strong>), spaCy's
                             NLP engine, FastAPI's async server, and DroneKit's MAVLink API for
                             sub-100ms command latency end-to-end.
                         </p>
 
                         {/* Feature highlights */}
                         {[
-                            { icon: '🔒', t: 'Dual Offline STT', d: 'Vosk (real-time streaming) + Whisper (high-accuracy batch) — zero cloud dependency' },
+                            { icon: '🔒', t: 'Dual Offline STT', d: 'Whisper (real-time streaming) + Whisper (high-accuracy batch) — zero cloud dependency' },
                             { icon: '⚡', t: 'Real-time Execution', d: 'FastAPI threadpool prevents blocking; commands execute in < 100ms end-to-end' },
                             { icon: '🛡️', t: 'Safety-First Design', d: 'Arming checks, armability guards, and mode validation before every action' },
-                            { icon: '🌐', t: 'SITL + Real Hardware', d: 'Works with ArduPilot SITL simulator or any MAVLink-capable drone via UDP' },
+                            { icon: '🌐', t: 'SITL + Real Hardware', d: 'Works with ArduPilot SITL simulator or any MAVLink-capable drone via UDP/TCP' },
                         ].map(f => (
                             <div key={f.t} style={{
                                 display: 'flex', gap: 14, marginBottom: 18,

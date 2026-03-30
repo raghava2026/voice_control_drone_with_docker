@@ -5,7 +5,7 @@ const PHRASES = [
     '"Take off 10 meters"',
     '"Move forward 5 meters"',
     '"Rotate right 90 degrees"',
-    '"Return to Launch"',
+    '"Return to Home"',
     '"Land now"',
     '"Hold position"',
 ]

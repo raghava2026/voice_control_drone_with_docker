@@ -7,7 +7,7 @@ const COMMAND_GROUPS = [
         commands: [
             { cmd: 'Take off 10 meters', intent: 'TAKEOFF', value: 10 },
             { cmd: 'Land now', intent: 'LAND', value: null },
-            { cmd: 'Return to Launch', intent: 'RTL', value: null },
+            { cmd: 'Return to Home', intent: 'RTL', value: null },
             { cmd: 'Arm the drone', intent: 'ARM', value: null },
             { cmd: 'Disarm', intent: 'DISARM', value: null },
         ],

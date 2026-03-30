@@ -6,7 +6,7 @@ const DEMO_COMMANDS = [
     { cmd: 'Take off 10 meters', intent: 'TAKEOFF', value: 10 },
     { cmd: 'Move forward 5', intent: 'MOVE_FORWARD', value: 5 },
     { cmd: 'Rotate right 90°', intent: 'ROTATE_CW', value: 90 },
-    { cmd: 'Return to Launch', intent: 'RTL', value: null },
+    { cmd: 'Return to Home', intent: 'RTL', value: null },
     { cmd: 'Land now', intent: 'LAND', value: null },
     { cmd: 'Hold position', intent: 'HOLD', value: null },
 ]

@@ -8,7 +8,7 @@ const TEAM = [
         college: 'G PULLA REDDY ENGINEERING COLLEGE',          // ← replace
         avatar: '/avatar_raghavendra.png',
         accent: '#00e5ff',
-        contrib: ['Voice NLP Pipeline', 'FastAPI Backend', 'React Showcase'],
+        contrib: ['Voice NLP Pipeline', 'FastAPI Backend', 'Docker'],
         github: '',
         linkedin: '',
     },
@@ -19,7 +19,7 @@ const TEAM = [
         college: 'G PULLA REDDY ENGINEERING COLLEGE',          // ← replace
         avatar: '/avatar_sreekanth.png',
         accent: '#a78bfa',
-        contrib: ['DroneKit Integration', 'MAVLink Protocol', 'SITL Testing'],
+        contrib: ['DroneKit Integration', 'MAVLink Protocol', 'SITL Testing', 'React Showcase'],
         github: '',
         linkedin: '',
     },
@@ -30,7 +30,7 @@ const TEAM = [
         college: 'G PULLA REDDY ENGINEERING COLLEGE',          // ← replace
         avatar: '/avatar_chandra.png',
         accent: '#f59e0b',
-        contrib: ['Hardware Setup', 'Architecture Design', 'Documentation'],
+        contrib: ['System Design', 'Architecture Design', 'Documentation'],
         github: '',
         linkedin: '',
     },
