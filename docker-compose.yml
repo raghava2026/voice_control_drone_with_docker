@@ -21,6 +21,11 @@ services:
       - "8002:8002"
     environment:
       - SITL_HOST=sitl
+      - WHISPER_MODEL=base
+      - WHISPER_DEVICE=cpu
+      - WHISPER_COMPUTE_TYPE=int8
+      - WHISPER_BEAM_SIZE=1
+      - HF_TOKEN=${HF_TOKEN}
     depends_on:
       - sitl
     networks:
@@ -35,7 +40,7 @@ services:
     ports:
       - "5173:5173"
     environment:
-      - VITE_BACKEND_URL=http://localhost:8002
+      - VITE_PROXY_TARGET=http://backend:8002
     depends_on:
       - backend
     networks:

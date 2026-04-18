@@ -1,578 +1,778 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
-
-const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8002'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useWhisper } from '../hooks/useWhisper'
 
 const DEMO_COMMANDS = [
-    { cmd: 'Take off 10 meters', intent: 'TAKEOFF', value: 10 },
-    { cmd: 'Move forward 5', intent: 'MOVE_FORWARD', value: 5 },
-    { cmd: 'Rotate right 90°', intent: 'ROTATE_CW', value: 90 },
-    { cmd: 'Return to Home', intent: 'RTL', value: null },
-    { cmd: 'Land now', intent: 'LAND', value: null },
-    { cmd: 'Hold position', intent: 'HOLD', value: null },
+  'Take off 10 meters',
+  'Move forward 5',
+  'Rotate right 90 degrees',
+  'Return to Home',
+  'Land now',
+  'Hold position',
 ]
 
-// ── Default simulated telemetry (used when backend not connected) ──
 const DEFAULT_TEL = {
-    altitude: 0, groundspeed: 0, airspeed: 0,
-    battPct: 87, battVolt: null, lat: 35.363261, lon: 149.165230,
-    mode: 'GUIDED', heading: 0, roll: 0, pitch: 0,
-    armed: false, satellites: 0, gps_fix: 0,
+  altitude:    0,
+  groundspeed: 0,
+  airspeed:    0,
+  battPct:     null,
+  battVolt:    null,
+  lat:         35.363261,
+  lon:         149.16523,
+  mode:        'GUIDED',
+  heading:     0,
+  roll:        0,
+  pitch:       0,
+  armed:       false,
+  satellites:  0,
+  gps_fix:     0,
+  connected:   false,
 }
 
+const MODE_COLORS = {
+  GUIDED:    '#10b981',
+  LAND:      '#f59e0b',
+  RTL:       '#00e5ff',
+  BRAKE:     '#ef4444',
+  STABILIZE: '#a78bfa',
+  LOITER:    '#38bdf8',
+  ALT_HOLD:  '#fb923c',
+  AUTO:      '#34d399',
+  UNKNOWN:   '#475569',
+}
+
+// ─── Gauge bar ───────────────────────────────────────────────────────────────
 function Gauge({ label, value, max, unit, color }) {
-    const pct = Math.min(100, (value / max) * 100)
-    return (
-        <div style={{ padding: '14px 16px', borderRadius: 12, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.05)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: '0.78rem' }}>
-                <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>{label}</span>
-                <span style={{ color, fontWeight: 700, fontFamily: 'var(--mono)' }}>{value}{unit}</span>
-            </div>
-            <div style={{ height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 4, overflow: 'hidden' }}>
-                <div style={{
-                    height: '100%', width: `${pct}%`,
-                    background: `linear-gradient(90deg, ${color}88, ${color})`,
-                    borderRadius: 4, transition: 'width 0.5s ease',
-                    boxShadow: `0 0 8px ${color}55`,
-                }} />
-            </div>
-        </div>
-    )
+  const pct = Math.min(100, Math.max(0, (value / max) * 100))
+  return (
+    <div style={{ padding: 12, borderRadius: 12, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.05)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: '0.78rem' }}>
+        <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>{label}</span>
+        <span style={{ color, fontWeight: 700, fontFamily: 'var(--mono)' }}>{value}{unit}</span>
+      </div>
+      <div style={{ height: 5, background: 'rgba(255,255,255,0.06)', borderRadius: 4, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${pct}%`, background: `linear-gradient(90deg,${color}88,${color})`, borderRadius: 4, transition: 'width 0.6s ease' }} />
+      </div>
+    </div>
+  )
 }
 
-const MODE_COLORS = { GUIDED: '#10b981', LAND: '#f59e0b', RTL: '#00e5ff', BRAKE: '#ef4444', STABILIZE: '#a78bfa', UNKNOWN: '#475569' }
+// ─── Attitude indicator (artificial horizon) ─────────────────────────────────
+function AttitudeWidget({ roll, pitch }) {
+  return (
+    <div style={{ position: 'relative', width: 80, height: 80, borderRadius: '50%', overflow: 'hidden', border: '2px solid rgba(255,255,255,0.12)', flexShrink: 0, background: '#0d1b2a' }}>
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: `linear-gradient(${roll}deg, #1565c0 50%, #5d4037 50%)`,
+        transform: `translateY(${pitch * 0.6}px)`,
+        transition: 'transform 0.4s ease, background 0.4s ease',
+      }} />
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: 30, height: 1, background: '#ffeb3b' }} />
+      </div>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: 1, height: 8, background: '#ffeb3b' }} />
+      </div>
+    </div>
+  )
+}
 
+// ─── Compass ──────────────────────────────────────────────────────────────────
+function Compass({ heading }) {
+  return (
+    <div style={{ position: 'relative', width: 80, height: 80, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.12)', flexShrink: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <svg width="76" height="76" viewBox="0 0 76 76">
+        <circle cx="38" cy="38" r="36" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
+        {['N','E','S','W'].map((d, i) => {
+          const angle = i * 90
+          const rad   = (angle - 90) * Math.PI / 180
+          const x     = 38 + 28 * Math.cos(rad)
+          const y     = 38 + 28 * Math.sin(rad)
+          return <text key={d} x={x} y={y} textAnchor="middle" dominantBaseline="middle" fill={d === 'N' ? '#ef4444' : '#64748b'} fontSize="9" fontWeight="700">{d}</text>
+        })}
+        <line
+          x1="38" y1="38"
+          x2={38 + 22 * Math.cos((heading - 90) * Math.PI / 180)}
+          y2={38 + 22 * Math.sin((heading - 90) * Math.PI / 180)}
+          stroke="#00e5ff" strokeWidth="2" strokeLinecap="round"
+          style={{ transition: 'all 0.5s ease' }}
+        />
+        <circle cx="38" cy="38" r="3" fill="#00e5ff" />
+      </svg>
+    </div>
+  )
+}
+
+// ─── Mini waveform bars ───────────────────────────────────────────────────────
+function WaveformBars({ active, color = '#00e5ff' }) {
+  const [bars, setBars] = useState(Array(16).fill(4))
+  useEffect(() => {
+    if (!active) { setBars(Array(16).fill(4)); return }
+    const id = setInterval(() => {
+      setBars(Array(16).fill(0).map(() => Math.floor(Math.random() * 26) + 4))
+    }, 80)
+    return () => clearInterval(id)
+  }, [active])
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 28 }}>
+      {bars.map((h, i) => (
+        <div key={i} style={{ width: 3, height: h, borderRadius: 2, background: active ? color : 'rgba(255,255,255,0.1)', transition: 'height 0.08s ease' }} />
+      ))}
+    </div>
+  )
+}
+
+// ─── Network state ────────────────────────────────────────────────────────────
+function getConnectionState() {
+  const conn      = navigator.connection || navigator.mozConnection || navigator.webkitConnection
+  const isOnline  = navigator.onLine
+  const effType   = conn?.effectiveType || 'unknown'
+  const rtt       = typeof conn?.rtt === 'number' ? conn.rtt : null
+  const goodConn  = conn ? !['slow-2g', '2g'].includes(effType) && (rtt === null || rtt < 1200) : true
+  return { isOnline, effectiveType: effType, rtt, useOnline: isOnline && goodConn }
+}
+
+function resultStatus(result) {
+  if (!result) return 'Awaiting command...'
+  if (result.status === 'executed') return `✅ ${result.intent?.replaceAll('_', ' ')} executed`
+  if (result.status === 'ignored')  return result.detail || 'Command ignored'
+  return result.detail || 'Request failed'
+}
+
+function engineLabel(mode) {
+  return mode === 'online' ? '⚡ ONLINE (Fast)' : '📡 OFFLINE (Local)'
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
 export default function LiveDemoSection() {
-    const [inputText, setInputText] = useState('')
-    const [micActive, setMicActive] = useState(false)
-    const [sttMode, setSttMode] = useState('whisper')  // 'whisper' | 'online'
-    const [recProgress, setRecProgress] = useState(0)       // 0-100 recording fill
-    const [sttLabel, setSttLabel] = useState('')      // status line under mic
-    const [log, setLog] = useState([])
-    const [tel, setTel] = useState(DEFAULT_TEL)
-    const [backendOk, setBackendOk] = useState(null)
-    const [liveMode, setLiveMode] = useState(false)
-    const logRef = useRef()
-    const esSrcRef = useRef(null)
+  const [inputText,            setInputText]            = useState('')
+  const [interimText,          setInterimText]          = useState('')   // live "Recording..." feedback
+  const [micActive,            setMicActive]            = useState(false)
+  const [modePreference,       setModePreference]       = useState('auto')
+  const [fallbackMode,         setFallbackMode]         = useState(null)
+  const [offlineAutoStartToken,setOfflineAutoStartToken] = useState(0)
+  const [sttLabel,             setSttLabel]             = useState('Hybrid controller ready.')
+  const [log,                  setLog]                  = useState([])
+  const [tel,                  setTel]                  = useState(DEFAULT_TEL)
+  const [backendOk,            setBackendOk]            = useState(null)
+  const [liveMode,             setLiveMode]             = useState(false)
+  const [networkState,         setNetworkState]         = useState(getConnectionState())
+  const [commandPending,       setCommandPending]       = useState(false)
+  const [offlineSpeaking,      setOfflineSpeaking]      = useState(false)
+  const [offlineListening,     setOfflineListening]     = useState(false)
+  const [offlineTranscribing,  setOfflineTranscribing]  = useState(false)
 
-    // ── 1. Detect backend & connect SSE ───────────────────────────────
-    useEffect(() => {
-        // Quick connectivity probe
-        fetch(`${BACKEND}/telemetry`, { signal: AbortSignal.timeout(2500) })
-            .then(r => r.json())
-            .then(data => {
-                setBackendOk(true)
-                if (data.connected) {
-                    setLiveMode(true)
-                    connectSSE()
-                }
-            })
-            .catch(() => setBackendOk(false))
+  const srRef            = useRef(null)
+  const shouldListenRef  = useRef(false)
+  const logRef           = useRef(null)
+  const esRef            = useRef(null)
 
-        return () => { if (esSrcRef.current) esSrcRef.current.close() }
-    }, [])
+  const autoMode   = networkState.useOnline ? 'online' : 'offline'
+  const activeMode = fallbackMode || (modePreference === 'auto' ? autoMode : modePreference)
+  const modeColor  = MODE_COLORS[tel.mode] || '#475569'
 
-    // ── 2. Server-Sent Events – 2 Hz real drone data ──────────────────
-    const connectSSE = useCallback(() => {
-        if (esSrcRef.current) esSrcRef.current.close()
-        const es = new EventSource(`${BACKEND}/telemetry/stream`)
-        esSrcRef.current = es
+  // ─── Helpers ─────────────────────────────────────────────────────────────
+  const addLog = useCallback((msg, type = 'info') => {
+    const ts = new Date().toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    setLog(curr => [...curr.slice(-49), { msg, type, ts }])
+  }, [])
 
-        es.onmessage = (e) => {
-            try {
-                const d = JSON.parse(e.data)
-                if (!d || !d.connected) return
-                setTel(prev => ({
-                    ...prev,
-                    altitude: d.altitude ?? prev.altitude,
-                    groundspeed: d.groundspeed ?? prev.groundspeed,
-                    airspeed: d.airspeed ?? prev.airspeed,
-                    battPct: d.battery_pct != null ? d.battery_pct : prev.battPct,
-                    battVolt: d.battery_volt ?? prev.battVolt,
-                    lat: d.lat ?? prev.lat,
-                    lon: d.lon ?? prev.lon,
-                    mode: d.mode ?? prev.mode,
-                    heading: d.heading ?? prev.heading,
-                    roll: d.roll ?? prev.roll,
-                    pitch: d.pitch ?? prev.pitch,
-                    armed: d.armed ?? prev.armed,
-                    satellites: d.satellites ?? prev.satellites,
-                    gps_fix: d.gps_fix ?? prev.gps_fix,
-                }))
-            } catch { /* ignore parse errors */ }
-        }
+  const speak = useCallback((text) => {
+    if (!('speechSynthesis' in window)) return
+    const msg = new SpeechSynthesisUtterance(text)
+    msg.rate  = 1.08; msg.pitch = 0.95
+    window.speechSynthesis.speak(msg)
+  }, [])
 
-        es.onerror = () => {
-            es.close()
-            // Retry after 3 s
-            setTimeout(connectSSE, 3000)
-        }
-    }, [])
+  // ─── Offline Whisper hook (always mounted, activated by mode) ────────────
+  const {
+    isListening:    whisperListening,
+    isTranscribing: whisperTranscribing,
+    isSpeaking:     whisperSpeaking,
+    workerReady:    whisperReady,
+    lastLatency:    whisperLatency,
+    startListening: startWhisper,
+    stopListening:  stopWhisper,
+  } = useWhisper({
+    onResult: useCallback((response, meta) => {
+      const text = response?.text || ''
+      if (text) setInputText(text)
+      setInterimText('')
+      setCommandPending(false)
 
-    // ── Auto-scroll log ───────────────────────────────────────────────
-    useEffect(() => {
-        if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
-    }, [log])
+      const prefix = '[OFFLINE]'
+      if (response?.status === 'executed') {
+        addLog(`${prefix} ▶ "${text}" → ${response.intent} executed`, 'ok')
+        speak(`${response.intent.replaceAll('_', ' ').toLowerCase()} executed.`)
+        setSttLabel(`✅ ${response.intent} executed`)
+      } else if (response?.status === 'ignored') {
+        addLog(`${prefix} ▶ "${text}" — ${response.detail || 'ignored'}`, 'warn')
+        setSttLabel(response.detail || 'Command not recognized')
+      } else {
+        addLog(`${prefix} ${response?.detail || 'Request failed'}`, 'warn')
+        setSttLabel(response?.detail || 'Request failed')
+      }
+    }, [addLog, speak]),
 
-    const addLog = (msg, type = 'info') => {
-        const ts = new Date().toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
-        setLog(l => [...l.slice(-29), { msg, type, ts }])
+    onError: useCallback((msg) => {
+      setSttLabel(msg)
+      addLog(msg, 'warn')
+    }, [addLog]),
+
+    onStatusChange: useCallback((status) => {
+      setSttLabel(status)
+    }, []),
+
+    onSpeakingChange: useCallback((speaking) => {
+      setOfflineSpeaking(speaking)
+      if (speaking) setCommandPending(true)
+    }, []),
+
+    onInterimText: useCallback((text) => {
+      setInterimText(text)
+    }, []),
+  })
+
+  // sync offline state badges
+  useEffect(() => { setOfflineListening(whisperListening) },    [whisperListening])
+  useEffect(() => { setOfflineTranscribing(whisperTranscribing) }, [whisperTranscribing])
+
+  // ─── Online Web Speech ────────────────────────────────────────────────────
+  const stopOnlineListening = useCallback((message = 'System stopped.') => {
+    shouldListenRef.current = false
+    setMicActive(false)
+    setCommandPending(false)
+    setSttLabel(message)
+    setInterimText('')
+    if (srRef.current) {
+      try { srRef.current.onresult = null; srRef.current.onerror = null; srRef.current.onend = null; srRef.current.stop() } catch (_) {}
+      srRef.current = null
+    }
+  }, [])
+
+  const fallbackToOffline = useCallback((reason) => {
+    stopOnlineListening(`${reason}. Switching to Whisper...`)
+    setFallbackMode('offline')
+    setOfflineAutoStartToken(v => v + 1)
+    addLog(`${reason} — falling back to offline Whisper.`, 'warn')
+  }, [addLog, stopOnlineListening])
+
+  const applyCommandResult = useCallback((result, source = 'manual') => {
+    setCommandPending(false)
+    if (result?.text) setInputText(result.text)
+    setSttLabel(resultStatus(result))
+
+    const prefix = `[${(result?.mode || source).toUpperCase()}]`
+    if (result?.status === 'executed') {
+      addLog(`${prefix} ▶ "${result.text}" → ${result.intent} executed`, 'ok')
+      speak(`${result.intent.replaceAll('_', ' ').toLowerCase()} executed.`)
+      return
+    }
+    if (result?.status === 'ignored') {
+      addLog(`${prefix} ▶ "${result.text || ''}" — ${result.detail || 'Command ignored'}`, 'warn')
+      return
+    }
+    addLog(`${prefix} ${result?.detail || 'Request failed'}`, 'warn')
+  }, [addLog, speak])
+
+  const executeTextCommand = useCallback(async (text, options = {}) => {
+    const trimmed = text.trim()
+    if (!trimmed) return null
+
+    setInputText(trimmed)
+    setInterimText('')
+    addLog(`> "${trimmed}"`, 'cmd')
+    setCommandPending(true)
+    setSttLabel(options.source === 'online' ? 'Processing voice...' : 'Dispatching command...')
+
+    try {
+      const res  = await fetch('/text-command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: trimmed, confidence: Number.isFinite(options.confidence) ? options.confidence : 1 }),
+      })
+      const data = await res.json()
+      setBackendOk(true)
+      applyCommandResult(data, options.source || 'manual')
+      return data
+    } catch (_) {
+      setBackendOk(false)
+      setCommandPending(false)
+      setSttLabel('Backend unreachable')
+      addLog('Backend unreachable', 'warn')
+      return null
+    }
+  }, [addLog, applyCommandResult])
+
+  const startOnlineListening = useCallback(() => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SR) { fallbackToOffline('Browser speech recognition unavailable'); return }
+    if (micActive) { stopOnlineListening(); return }
+
+    const recognition         = new SR()
+    srRef.current             = recognition
+    recognition.lang          = 'en-US'
+    recognition.continuous    = true
+    recognition.interimResults = true    // ← enables real-time interim text
+    recognition.maxAlternatives = 1
+
+    shouldListenRef.current = true
+    setMicActive(true)
+    setSttLabel('Listening...')
+
+    recognition.onresult = async (event) => {
+      let interim  = ''
+      let finalTxt = ''
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const t = event.results[i][0].transcript
+        if (event.results[i].isFinal) finalTxt += t
+        else interim += t
+      }
+      if (interim) setInterimText(interim)
+      if (finalTxt) {
+        const transcript = finalTxt.trim()
+        setInterimText('')
+        setInputText(transcript)
+        await executeTextCommand(transcript, {
+          source: 'online',
+          confidence: event.results[event.results.length - 1][0].confidence,
+        })
+        if (shouldListenRef.current) setSttLabel('Listening...')
+      }
     }
 
-    // ── Send command to backend ───────────────────────────────────────
-    const executeCmd = async (text, intent, value) => {
-        addLog(`> "${text}"`, 'cmd')
-
-        if (!backendOk || !liveMode) {
-            alert("⚠️ Connection Pending\n\nPlease ensure the VoiceControlDrone server is running, and connect SITL, QGroundControl, and all other connections to execute commands.")
-            addLog('Command rejected: Connection is pending', 'warn')
-            return
-        }
-
-        try {
-            const res = await fetch(`${BACKEND}/command`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text }),
-            })
-            const data = await res.json()
-            addLog(`intent=${data.intent}  value=${data.value}  status=${data.status}`, 'ok')
-        } catch {
-            alert("⚠️ Connection Pending\n\nPlease ensure the VoiceControlDrone server is running, and connect SITL, QGroundControl, and all other connections to execute commands.")
-            addLog('Backend unreachable', 'warn')
-        }
+    recognition.onerror = (event) => {
+      if (event.error === 'no-speech') { setSttLabel('No speech detected. Still listening...'); return }
+      fallbackToOffline(`Web Speech error: ${event.error}`)
     }
 
-
-
-    const handleSend = () => {
-        if (!inputText.trim()) return
-        executeCmd(inputText, 'UNKNOWN', null)
-        setInputText('')
+    recognition.onend = () => {
+      if (!shouldListenRef.current) { setMicActive(false); return }
+      try { recognition.start() } catch (_) { fallbackToOffline('Web Speech restart failed') }
     }
 
-    // ── speech processing state ──────────────────────────────────────
-    const shouldListenRef = useRef(false);
-    const mediaRecorderRef = useRef(null);
-    const audioChunksRef = useRef([]);
-    const tickerRef = useRef(null);
-    const srRef = useRef(null); // For Web Speech API ref
+    try { recognition.start() } catch (_) { fallbackToOffline('Web Speech failed to start') }
+  }, [executeTextCommand, fallbackToOffline, micActive, stopOnlineListening])
 
-    const stopListening = () => {
-        shouldListenRef.current = false;
-        setMicActive(false);
-        setRecProgress(0);
-        setSttLabel('🛑 System Stopped.');
-        clearInterval(tickerRef.current);
-
-        if (sttMode === 'whisper') {
-            if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-                mediaRecorderRef.current.stop();
-            }
-            if (mediaRecorderRef.current && mediaRecorderRef.current.stream) {
-                mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
-            }
-        } else if (srRef.current) {
-            try { srRef.current.stop(); } catch (e) { }
-        }
-    };
-
-    const processWhisperAudio = async (blob) => {
-        if (blob.size === 0) return;
-        const form = new FormData()
-        form.append('audio', blob, 'cmd.webm')
-
-        try {
-            setSttLabel("⏳ Transcribing (Whisper)...");
-            const res = await fetch(`${BACKEND}/stt`, { method: 'POST', body: form })
-            const data = await res.json()
-
-            if ((data.status === 'ok') && data.text) {
-                const text = data.text.trim();
-                setInputText(text)
-                setSttLabel(`✅ Whisper: "${text}"`)
-                addLog(`Whisper: "${text}"`, 'ok')
-                await executeCmd(text, 'UNKNOWN', null)
-            } else if (data.status === 'empty') {
-                // Ignore silence
-                setSttLabel(`🎧 Listening...`)
-            } else {
-                setSttLabel(`⚠️ STT Error: ${data.detail || 'Unknown'}`)
-            }
-        } catch {
-            setSttLabel(`⚠️ Backend unreachable. Is server.py running?`)
-        }
-    };
-
-    const startRecordingCycle = () => {
-        if (!shouldListenRef.current || !mediaRecorderRef.current) return;
-        audioChunksRef.current = [];
-
-        try {
-            mediaRecorderRef.current.start();
-            setSttLabel('🎧 Listening... (Speak now)');
-
-            // Manage progress bar
-            setRecProgress(0);
-            const REC_MS = 5000;
-            const TICK_MS = 80;
-            let elapsed = 0;
-            tickerRef.current = setInterval(() => {
-                elapsed += TICK_MS;
-                setRecProgress(Math.min(100, (elapsed / REC_MS) * 100));
-            }, TICK_MS);
-
-            setTimeout(() => {
-                clearInterval(tickerRef.current);
-                if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-                    mediaRecorderRef.current.stop();
-                }
-            }, REC_MS);
-        } catch (e) { console.error(e) }
-    };
-
-    const startOfflineListening = async () => {
-        if (!navigator.mediaDevices?.getUserMedia) {
-            addLog('⚠️ getUserMedia not available — use HTTPS or localhost', 'warn')
-            return
-        }
-        setMicActive(true);
-        shouldListenRef.current = true;
-        setSttLabel('🎧 Initialize...');
-
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-            const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : ''
-            const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {})
-            mediaRecorderRef.current = recorder;
-
-            recorder.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
-
-            recorder.onstop = async () => {
-                const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' })
-
-                // Process audio asynchronously
-                processWhisperAudio(blob);
-
-                // Start next cycle if still listening
-                if (shouldListenRef.current) {
-                    setTimeout(startRecordingCycle, 200);
-                } else {
-                    stream.getTracks().forEach(t => t.stop());
-                }
-            };
-
-            startRecordingCycle();
-        } catch {
-            addLog('🚫 Microphone access denied', 'warn')
-            setMicActive(false); setSttLabel('')
-        }
-    }
-
-    const handleMic = async () => {
-        if (micActive) {
-            stopListening();
-            return;
-        }
-
-        if (sttMode === 'whisper') {
-            await startOfflineListening();
-            return;
-        }
-
-        // 🌐 Online — browser Web Speech API (requires internet)
-        if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
-            addLog('⚠️ Web Speech API not supported in this browser', 'warn')
-            return
-        }
-        const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-        const r = new SR()
-        srRef.current = r;
-        r.lang = 'en-US'
-        r.continuous = true
-        r.interimResults = false
-
+  // ─── Unified mic toggle ───────────────────────────────────────────────────
+  const handleMicToggle = useCallback(() => {
+    if (activeMode === 'online') {
+      startOnlineListening()
+    } else {
+      // offline mode
+      if (offlineListening || whisperListening) {
+        stopWhisper()
+        setMicActive(false)
+        setSttLabel('Microphone stopped.')
+      } else {
+        if (!whisperReady) { setSttLabel('Whisper not ready yet, please wait...'); return }
+        startWhisper()
         setMicActive(true)
-        shouldListenRef.current = true;
-        setSttLabel('Listening via Web Speech API…')
+        setSttLabel('Listening (offline Whisper)...')
+      }
+    }
+  }, [activeMode, offlineListening, startOnlineListening, startWhisper, stopWhisper, whisperListening, whisperReady])
 
-        r.onresult = e => {
-            const text = e.results[e.results.length - 1][0].transcript.trim()
-            if (!text) return;
-            setInputText(text)
-            setSttLabel(`🌐 Heard: "${text}"`)
-            addLog(`🌐 Web Speech: "${text}"`, 'ok')
-            executeCmd(text, 'UNKNOWN', null)
-            setTimeout(() => { if (shouldListenRef.current) setSttLabel('Listening via Web Speech API…') }, 3000)
-        }
-        r.onend = () => {
-            if (shouldListenRef.current) {
-                try { r.start(); } catch (e) { }
-            } else {
-                setMicActive(false); setSttLabel('🛑 System Stopped.');
-            }
-        }
-        r.onerror = (e) => {
-            console.error(e);
-            if (e.error !== 'no-speech') {
-                setMicActive(false); setSttLabel('⚠️ Web Speech Error');
-                shouldListenRef.current = false;
-            }
-        }
-        try { r.start(); } catch (e) { console.error(e) }
+  // ─── SSE telemetry stream ─────────────────────────────────────────────────
+  const connectSSE = useCallback(() => {
+    if (esRef.current) { esRef.current.close() }
+    const es  = new EventSource('/telemetry/stream')
+    esRef.current = es
+
+    es.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        setTel(prev => ({
+          ...prev,
+          connected:   data.connected   ?? prev.connected,
+          altitude:    data.altitude    ?? prev.altitude,
+          groundspeed: data.groundspeed ?? prev.groundspeed,
+          airspeed:    data.airspeed    ?? prev.airspeed,
+          battPct:     data.battery_pct  != null ? data.battery_pct : prev.battPct,
+          battVolt:    data.battery_volt ?? prev.battVolt,
+          lat:         data.lat         ?? prev.lat,
+          lon:         data.lon         ?? prev.lon,
+          mode:        data.mode        ?? prev.mode,
+          heading:     data.heading     ?? prev.heading,
+          roll:        data.roll        ?? prev.roll,
+          pitch:       data.pitch       ?? prev.pitch,
+          armed:       data.armed       ?? prev.armed,
+          satellites:  data.satellites  ?? prev.satellites,
+          gps_fix:     data.gps_fix     ?? prev.gps_fix,
+        }))
+        setLiveMode(data.connected === true)
+      } catch (_) {}
     }
 
-    // ── Derived values ────────────────────────────────────────────────
-    const displaySpeed = liveMode ? tel.groundspeed : tel.groundspeed
-    const displayBatt = tel.battPct ?? 87
-    const gpsFixed = tel.gps_fix >= 3
-    const modeColor = MODE_COLORS[tel.mode] || '#475569'
+    es.onerror = () => {
+      setLiveMode(false)
+      es.close()
+      setTimeout(connectSSE, 4000)
+    }
+  }, [])
 
-    return (
-        <section id="demo" className="section" style={{ zIndex: 1, background: 'linear-gradient(180deg, transparent, rgba(5,13,30,0.95) 15%, rgba(5,13,30,0.95) 85%, transparent)' }}>
-            <div className="container">
-                <div className="section-label">🎮 Live Demo</div>
-                <h2 className="section-title">Ground Control Station</h2>
+  // ─── Effects ──────────────────────────────────────────────────────────────
+  // network listener
+  useEffect(() => {
+    const update = () => setNetworkState(getConnectionState())
+    const conn   = navigator.connection || navigator.mozConnection || navigator.webkitConnection
+    window.addEventListener('online', update)
+    window.addEventListener('offline', update)
+    conn?.addEventListener?.('change', update)
+    return () => {
+      window.removeEventListener('online', update)
+      window.removeEventListener('offline', update)
+      conn?.removeEventListener?.('change', update)
+    }
+  }, [])
 
-                {/* ── Status bar ── */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 32, flexWrap: 'wrap' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                        Backend:
-                        <span style={{ fontWeight: 700, color: backendOk ? '#10b981' : backendOk === false ? '#ef4444' : '#f59e0b' }}>
-                            {backendOk === null ? '⏳ Checking…' : backendOk ? '✅ localhost:8002' : '🟡 Offline'}
-                        </span>
+  // health probe + SSE start on mount
+  useEffect(() => {
+    const probe = async () => {
+      try {
+        const r = await fetch('/health')
+        const h = await r.json()
+        setBackendOk(h.status === 'ok')
+        setTel(prev => ({
+          ...prev,
+          mode:  h?.drone?.mode  ?? prev.mode,
+          armed: h?.drone?.armed ?? prev.armed,
+        }))
+      } catch (_) {
+        setBackendOk(false)
+      }
+    }
+    probe()
+    connectSSE()   // ← always start SSE on mount
+    return () => esRef.current?.close()
+  }, [connectSSE])
+
+  // auto-scroll log
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [log])
+
+  // auto-start offline when forced
+  useEffect(() => {
+    if (offlineAutoStartToken > 0 && whisperReady && !whisperListening) {
+      startWhisper()
+      setMicActive(true)
+    }
+  }, [offlineAutoStartToken, whisperReady, whisperListening, startWhisper])
+
+  // stop online when switching to offline
+  useEffect(() => {
+    if (modePreference !== 'auto') setFallbackMode(null)
+    if (modePreference !== 'online' && micActive && srRef.current) {
+      stopOnlineListening(modePreference === 'offline' ? 'Switched to offline Whisper.' : 'Online listening stopped.')
+    }
+  }, [micActive, modePreference, stopOnlineListening])
+
+  // network-triggered fallback
+  useEffect(() => {
+    if (modePreference === 'auto' && micActive && !networkState.useOnline) {
+      fallbackToOffline('Connection degraded')
+    }
+  }, [fallbackToOffline, micActive, modePreference, networkState.useOnline])
+
+  // ─── Derived state ────────────────────────────────────────────────────────
+  const statusBadgeColor = backendOk === null ? '#f59e0b' : backendOk ? '#10b981' : '#ef4444'
+  const gpsFixed         = tel.gps_fix >= 3
+  const isMicOn          = activeMode === 'online' ? micActive : (offlineListening || whisperListening)
+  const isSpeakingNow    = activeMode === 'online' ? micActive : offlineSpeaking
+  const isProcessingNow  = activeMode === 'offline' && (offlineTranscribing || whisperTranscribing)
+
+  // What to show in the input box
+  const displayValue = interimText || inputText
+
+  return (
+    <section id='demo' className='section' style={{ zIndex: 1, background: 'linear-gradient(180deg, transparent, rgba(5,13,30,0.95) 15%, rgba(5,13,30,0.95) 85%, transparent)' }}>
+      <div className='container'>
+        <div className='section-label'>Live Demo</div>
+        <h2 className='section-title'>Ground Control Station</h2>
+
+        {/* Status bar */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 28, flexWrap: 'wrap' }}>
+          <StatusPill label='Backend' value={backendOk === null ? 'Checking...' : backendOk ? 'Healthy' : 'Offline'} color={statusBadgeColor} />
+          <StatusPill label='Telemetry' value={liveMode ? '● LIVE' : '○ Simulation'} color={liveMode ? '#00e5ff' : '#f59e0b'} />
+          <StatusPill label='Network' value={networkState.isOnline ? `${networkState.effectiveType?.toUpperCase()}` : 'OFFLINE'} color={networkState.useOnline ? '#10b981' : '#ef4444'} />
+          {tel.armed && (
+            <span style={{ padding: '3px 12px', borderRadius: 50, fontSize: '0.78rem', fontWeight: 700, background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', color: '#ef4444', animation: 'glow-pulse 1s infinite' }}>
+              ⚡ ARMED
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 0.85fr', gap: 28, alignItems: 'start' }}>
+          {/* ── Left column ── */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+
+            {/* Voice command panel */}
+            <div className='glass' style={{ borderRadius: 16, padding: '18px 20px' }}>
+
+              {/* Mode selector */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                <span style={{ fontSize: 11, color: '#888', fontWeight: 700, letterSpacing: '0.06em' }}>STT MODE:</span>
+                {['auto', 'online', 'offline'].map(opt => (
+                  <button key={opt} onClick={() => setModePreference(opt)} style={{
+                    padding: '6px 14px', borderRadius: 20,
+                    border: `1px solid ${modePreference === opt ? '#00e5ff' : 'rgba(255,255,255,0.12)'}`,
+                    background: modePreference === opt ? 'rgba(0,229,255,0.12)' : 'transparent',
+                    color: modePreference === opt ? '#00e5ff' : 'var(--text-secondary)',
+                    fontSize: 12, fontWeight: 700, cursor: 'pointer', textTransform: 'uppercase',
+                  }}>
+                    {opt}
+                  </button>
+                ))}
+                <span className='pill' style={{ color: activeMode === 'offline' ? '#66bb6a' : '#4fc3f7', borderColor: activeMode === 'offline' ? 'rgba(102,187,106,0.3)' : 'rgba(79,195,247,0.3)', fontSize: 11 }}>
+                  {engineLabel(activeMode)}
+                </span>
+                {fallbackMode && <span className='pill' style={{ color: '#f59e0b', borderColor: 'rgba(245,158,11,0.3)', fontSize: 11 }}>FAILSAFE</span>}
+              </div>
+
+              {/* ── Unified mic + input row (same for online & offline) ── */}
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                {/* Mic button */}
+                <button
+                  id='mic-toggle-btn'
+                  onClick={handleMicToggle}
+                  title={isMicOn ? 'Stop listening' : 'Start listening'}
+                  style={{
+                    width: 48, height: 48, borderRadius: '50%', flexShrink: 0,
+                    background: isMicOn
+                      ? isSpeakingNow ? 'rgba(239,68,68,0.25)' : 'rgba(0,229,255,0.15)'
+                      : 'rgba(255,255,255,0.05)',
+                    border: `2px solid ${isMicOn ? (isSpeakingNow ? '#ef4444' : '#00e5ff') : 'rgba(255,255,255,0.15)'}`,
+                    fontSize: '1.3rem',
+                    cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    animation: isSpeakingNow ? 'glow-pulse 0.8s infinite' : 'none',
+                    transition: 'all 0.25s ease',
+                  }}
+                >
+                  {isMicOn ? (isSpeakingNow ? '🔴' : '🎙️') : '🎤'}
+                </button>
+
+                {/* Input box — shows interim text live, final text after result */}
+                <div style={{ flex: 1, position: 'relative' }}>
+                  <input
+                    id='command-input'
+                    value={displayValue}
+                    onChange={e => { setInputText(e.target.value); setInterimText('') }}
+                    onKeyDown={e => e.key === 'Enter' && executeTextCommand(inputText, { source: 'manual', confidence: 1 })}
+                    placeholder='Type or speak a command...'
+                    style={{
+                      width: '100%',
+                      background: interimText ? 'rgba(0,229,255,0.04)' : 'rgba(255,255,255,0.04)',
+                      border: `1px solid ${interimText ? 'rgba(0,229,255,0.35)' : 'rgba(0,229,255,0.15)'}`,
+                      borderRadius: 10,
+                      padding: '11px 14px',
+                      fontFamily: 'var(--mono)',
+                      fontSize: '0.88rem',
+                      color: interimText ? '#94a3b8' : 'var(--text-primary)',
+                      fontStyle: interimText ? 'italic' : 'normal',
+                      outline: 'none',
+                      boxSizing: 'border-box',
+                      transition: 'border-color 0.2s ease',
+                    }}
+                  />
+                  {isProcessingNow && (
+                    <div style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: '0.7rem', color: '#a78bfa', fontWeight: 700 }}>
+                      ⏳
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                        Telemetry:
-                        <span style={{ fontWeight: 700, color: liveMode ? '#00e5ff' : '#f59e0b' }}>
-                            {liveMode ? '📡 LIVE — SSE stream active' : '🟡 Simulation mode'}
-                        </span>
-                    </div>
-                    {tel.armed && (
-                        <span style={{ padding: '3px 12px', borderRadius: 50, fontSize: '0.78rem', fontWeight: 700, background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', color: '#ef4444' }}>
-                            ⚠️ ARMED
-                        </span>
-                    )}
+                  )}
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28, alignItems: 'start' }}>
+                <button
+                  id='send-cmd-btn'
+                  onClick={() => executeTextCommand(inputText, { source: 'manual', confidence: 1 })}
+                  className='btn btn-primary'
+                  disabled={commandPending || !inputText.trim()}
+                  style={{ padding: '10px 18px', fontSize: '0.82rem', opacity: (commandPending || !inputText.trim()) ? 0.5 : 1, flexShrink: 0 }}
+                >
+                  {commandPending ? '...' : 'Send'}
+                </button>
+              </div>
 
-                    {/* ── LEFT: Voice input + Quick commands + Log ── */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-                        {/* Voice input row */}
-                        <div className="glass" style={{ borderRadius: 16, padding: '18px 20px' }}>
-                            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: recProgress > 0 ? 10 : 0 }}>
-                                {/* Mic button */}
-                                <button onClick={handleMic} style={{
-                                    width: 44, height: 44, borderRadius: '50%', flexShrink: 0,
-                                    background: micActive ? 'rgba(239,68,68,0.2)' : sttMode === 'offline' ? 'rgba(167,139,250,0.12)' : 'rgba(0,229,255,0.1)',
-                                    border: `2px solid ${micActive ? '#ef4444' : sttMode === 'offline' ? '#a78bfa' : '#00e5ff'}`,
-                                    fontSize: '1.2rem', cursor: 'pointer',
-                                    animation: micActive ? 'glow-pulse 1s infinite' : 'none',
-                                    transition: 'all 0.2s',
-                                }}>
-                                    {micActive ? '🔴' : '🎙️'}
-                                </button>
-                                <input
-                                    value={inputText}
-                                    onChange={e => setInputText(e.target.value)}
-                                    onKeyDown={e => e.key === 'Enter' && handleSend()}
-                                    placeholder="Type or speak a command…"
-                                    style={{
-                                        flex: 1, background: 'rgba(255,255,255,0.04)',
-                                        border: '1px solid rgba(0,229,255,0.15)', borderRadius: 10,
-                                        padding: '10px 14px', fontFamily: 'var(--mono)', fontSize: '0.88rem',
-                                        color: 'var(--text-primary)', outline: 'none',
-                                    }}
-                                />
-                                <button onClick={handleSend} className="btn btn-primary" style={{ padding: '10px 18px', fontSize: '0.82rem', flexShrink: 0 }}>
-                                    Send ↑
-                                </button>
-                            </div>
-
-                            {/* STT mode toggle */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                                <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700 }}>STT:</span>
-                                {[
-                                    { id: 'whisper', label: '🎙️ Whisper (offline)', color: '#a78bfa' },
-                                    { id: 'online', label: '🌐 Web Speech (online)', color: '#f59e0b' },
-                                ].map(m => (
-                                    <button key={m.id} onClick={() => setSttMode(m.id)} style={{
-                                        padding: '3px 11px', borderRadius: 50, fontSize: '0.67rem', fontWeight: 700,
-                                        cursor: 'pointer', fontFamily: 'var(--font)', transition: 'all 0.2s',
-                                        background: sttMode === m.id ? `${m.color}22` : 'rgba(255,255,255,0.04)',
-                                        border: `1px solid ${sttMode === m.id ? m.color : 'rgba(255,255,255,0.08)'}`,
-                                        color: sttMode === m.id ? m.color : 'var(--text-muted)',
-                                    }}>{m.label}</button>
-                                ))}
-                            </div>
-
-                            {/* sttLabel status + recording progress bar */}
-                            {sttLabel && (
-                                <div style={{ marginTop: 8, fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--mono)', padding: '4px 10px', background: 'rgba(0,0,0,0.3)', borderRadius: 6 }}>
-                                    {sttLabel}
-                                </div>
-                            )}
-                            {recProgress > 0 && (
-                                <div style={{ marginTop: 6, height: 4, borderRadius: 4, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
-                                    <div style={{
-                                        height: '100%', borderRadius: 4,
-                                        width: `${recProgress}%`,
-                                        background: 'linear-gradient(90deg, #a78bfa, #7c3aed)',
-                                        boxShadow: '0 0 8px #a78bfa66',
-                                        transition: 'width 0.08s linear',
-                                    }} />
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Quick commands */}
-                        <div className="glass" style={{ borderRadius: 16, padding: 18 }}>
-                            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 14 }}>
-                                Quick Commands
-                            </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-                                {DEMO_COMMANDS.map(c => (
-                                    <button key={c.cmd}
-                                        onClick={() => { setInputText(c.cmd); executeCmd(c.cmd, c.intent, c.value) }}
-                                        style={{
-                                            background: 'rgba(0,229,255,0.06)', border: '1px solid rgba(0,229,255,0.12)',
-                                            borderRadius: 10, padding: '8px 10px', cursor: 'pointer',
-                                            fontSize: '0.75rem', color: 'var(--text-secondary)', fontFamily: 'var(--font)',
-                                            fontWeight: 600, transition: 'all 0.2s', textAlign: 'center',
-                                        }}
-                                        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(0,229,255,0.15)'; e.currentTarget.style.color = '#00e5ff' }}
-                                        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(0,229,255,0.06)'; e.currentTarget.style.color = 'var(--text-secondary)' }}
-                                    >{c.cmd}</button>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Command log */}
-                        <div className="glass" style={{ borderRadius: 16, overflow: 'hidden' }}>
-                            <div style={{ padding: '10px 16px', background: 'rgba(0,0,0,0.3)', borderBottom: '1px solid rgba(0,229,255,0.08)', fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--mono)' }}>
-                                📋 GCS Command Log
-                            </div>
-                            <div ref={logRef} style={{ padding: 14, maxHeight: 220, overflowY: 'auto', fontFamily: 'var(--mono)', fontSize: '0.8rem' }}>
-                                {log.length === 0
-                                    ? <span style={{ color: 'var(--text-muted)' }}>Awaiting first command…</span>
-                                    : log.map((l, i) => (
-                                        <div key={i} style={{ padding: '3px 0', color: l.type === 'cmd' ? '#00e5ff' : l.type === 'ok' ? '#10b981' : l.type === 'warn' ? '#f59e0b' : 'var(--text-secondary)' }}>
-                                            <span style={{ color: 'var(--text-muted)' }}>[{l.ts}] </span>{l.msg}
-                                        </div>
-                                    ))
-                                }
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* ── RIGHT: Telemetry HUD ── */}
-                    <div className="glass" style={{ borderRadius: 18, overflow: 'hidden' }}>
-                        {/* Header */}
-                        <div style={{
-                            padding: '14px 20px', background: 'rgba(0,0,0,0.4)',
-                            borderBottom: '1px solid rgba(0,229,255,0.1)',
-                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        }}>
-                            <span style={{ fontWeight: 800, fontSize: '0.9rem' }}>
-                                📡 Telemetry HUD
-                                {liveMode && <span style={{ fontSize: '0.68rem', color: '#00e5ff', marginLeft: 8, fontWeight: 600 }}>● LIVE</span>}
-                            </span>
-                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                {/* Heading badge */}
-                                <span style={{ fontSize: '0.72rem', fontFamily: 'var(--mono)', color: 'var(--text-muted)' }}>
-                                    HDG {tel.heading}°
-                                </span>
-                                {/* Mode badge */}
-                                <span style={{
-                                    fontSize: '0.72rem', fontWeight: 700, padding: '4px 10px', borderRadius: 6,
-                                    background: `${modeColor}22`, border: `1px solid ${modeColor}44`, color: modeColor,
-                                }}>● {tel.mode}</span>
-                            </div>
-                        </div>
-
-                        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                            {/* Big value cards */}
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 4 }}>
-                                {[
-                                    { label: 'Altitude', val: tel.altitude, unit: ' m', color: '#00e5ff' },
-                                    { label: 'Groundspeed', val: displaySpeed.toFixed(1), unit: ' m/s', color: '#10b981' },
-                                ].map(v => (
-                                    <div key={v.label} style={{
-                                        padding: '18px', borderRadius: 14,
-                                        background: `radial-gradient(circle at 30% 30%, ${v.color}12, transparent)`,
-                                        border: `1px solid ${v.color}30`, textAlign: 'center',
-                                    }}>
-                                        <div style={{ fontSize: '2.2rem', fontWeight: 900, color: v.color, fontFamily: 'var(--mono)', lineHeight: 1 }}>
-                                            {v.val}
-                                            <span style={{ fontSize: '0.9rem', fontWeight: 400 }}>{v.unit}</span>
-                                        </div>
-                                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                                            {v.label} {liveMode ? <span style={{ color: '#00e5ff' }}>●</span> : ''}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-
-                            {/* Gauges */}
-                            <Gauge label="Battery" value={displayBatt.toFixed(0)} max={100} unit="%" color="#f59e0b" />
-                            <Gauge label="Altitude" value={tel.altitude} max={50} unit=" m" color="#00e5ff" />
-                            <Gauge label="Groundspeed" value={displaySpeed} max={15} unit=" m/s" color="#10b981" />
-                            <Gauge label="Airspeed" value={tel.airspeed} max={15} unit=" m/s" color="#a78bfa" />
-
-                            {/* Attitude row (roll / pitch) – only shown when live */}
-                            {liveMode && (
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                                    {[
-                                        { label: 'Roll', v: tel.roll, color: '#f59e0b' },
-                                        { label: 'Pitch', v: tel.pitch, color: '#a78bfa' },
-                                    ].map(a => (
-                                        <div key={a.label} style={{ padding: '10px 14px', borderRadius: 10, background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center' }}>
-                                            <div style={{ fontFamily: 'var(--mono)', fontSize: '1.1rem', fontWeight: 800, color: a.color }}>{a.v}°</div>
-                                            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>{a.label}</div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-
-                            {/* GPS / battery voltage row */}
-                            <div style={{ display: 'grid', gridTemplateColumns: tel.battVolt ? '1fr 1fr' : '1fr', gap: 10 }}>
-                                {/* GPS */}
-                                <div style={{ padding: '10px 14px', borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.05)', fontFamily: 'var(--mono)', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                    <span style={{ color: gpsFixed ? '#10b981' : '#f59e0b', marginRight: 6 }}>
-                                        {gpsFixed ? '📍 GPS LOCK' : '⚠️ GPS SEARCH'}
-                                    </span>
-                                    {tel.lat != null && (
-                                        <><br />{tel.lat.toFixed(5)} {tel.lon.toFixed(5)}</>
-                                    )}
-                                    {liveMode && <span style={{ color: 'var(--text-muted)' }}> · {tel.satellites} sats</span>}
-                                </div>
-                                {/* Battery voltage (live only) */}
-                                {tel.battVolt && (
-                                    <div style={{ padding: '10px 14px', borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center' }}>
-                                        <div style={{ fontFamily: 'var(--mono)', fontSize: '1rem', fontWeight: 800, color: '#f59e0b' }}>{tel.battVolt} V</div>
-                                        <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Batt Voltage</div>
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Scan-line shimmer */}
-                            <div style={{ position: 'relative', height: 2, overflow: 'hidden', marginTop: 2 }}>
-                                <div style={{
-                                    position: 'absolute', top: 0, left: 0, right: 0, height: '100%',
-                                    background: 'linear-gradient(90deg, transparent, #00e5ff55, transparent)',
-                                    animation: 'scan-line 3s linear infinite',
-                                }} />
-                            </div>
-                        </div>
-                    </div>
+              {/* Waveform + status row */}
+              <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <WaveformBars active={isSpeakingNow} color={isSpeakingNow ? '#ef4444' : '#00e5ff'} />
+                <div style={{ flex: 1, fontSize: '0.73rem', color: 'var(--text-muted)', fontFamily: 'var(--mono)', padding: '4px 10px', background: 'rgba(0,0,0,0.3)', borderRadius: 6, minWidth: 0 }}>
+                  <span style={{ color: isMicOn ? (isSpeakingNow ? '#ef4444' : '#00e5ff') : 'var(--text-muted)' }}>
+                    {sttLabel}
+                  </span>
                 </div>
+                {activeMode === 'offline' && whisperLatency && (
+                  <span style={{ fontSize: '0.65rem', color: '#64748b', fontFamily: 'var(--mono)', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: 4, flexShrink: 0 }}>
+                    {whisperLatency}ms
+                  </span>
+                )}
+              </div>
             </div>
 
-            <style>{`
-        @media (max-width: 768px) {
-          #demo .container > div { grid-template-columns: 1fr !important; }
+            {/* Quick commands */}
+            <div className='glass' style={{ borderRadius: 16, padding: 18 }}>
+              <div style={{ fontSize: '0.73rem', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 12 }}>
+                Quick Commands
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                {DEMO_COMMANDS.map(cmd => (
+                  <button
+                    key={cmd}
+                    onClick={() => { setInputText(cmd); executeTextCommand(cmd, { source: 'manual', confidence: 1 }) }}
+                    style={{ background: 'rgba(0,229,255,0.06)', border: '1px solid rgba(0,229,255,0.12)', borderRadius: 10, padding: '8px 10px', cursor: 'pointer', fontSize: '0.73rem', color: 'var(--text-secondary)', fontWeight: 600, transition: 'background 0.2s ease' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,229,255,0.12)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(0,229,255,0.06)'}
+                  >
+                    {cmd}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Command log */}
+            <div className='glass' style={{ borderRadius: 16, overflow: 'hidden' }}>
+              <div style={{ padding: '10px 16px', background: 'rgba(0,0,0,0.35)', borderBottom: '1px solid rgba(0,229,255,0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)', fontFamily: 'var(--mono)', fontWeight: 700 }}>GCS Command Log</span>
+                {log.length > 0 && (
+                  <button onClick={() => setLog([])} style={{ fontSize: '0.65rem', color: '#475569', background: 'none', border: 'none', cursor: 'pointer' }}>Clear</button>
+                )}
+              </div>
+              <div ref={logRef} style={{ padding: 14, maxHeight: 200, overflowY: 'auto', fontFamily: 'var(--mono)', fontSize: '0.78rem' }}>
+                {log.length === 0 ? (
+                  <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Awaiting first command...</span>
+                ) : (
+                  log.map((entry, i) => (
+                    <div key={i} style={{ padding: '2px 0', color: entry.type === 'cmd' ? '#00e5ff' : entry.type === 'ok' ? '#10b981' : entry.type === 'warn' ? '#f59e0b' : 'var(--text-secondary)' }}>
+                      <span style={{ color: '#334155' }}>[{entry.ts}]</span>{' '}
+                      {entry.msg}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Right column — Telemetry HUD ── */}
+          <div className='glass' style={{ borderRadius: 18, overflow: 'hidden', position: 'sticky', top: 20 }}>
+            <div style={{ padding: '14px 20px', background: 'rgba(0,0,0,0.4)', borderBottom: '1px solid rgba(0,229,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontWeight: 800, fontSize: '0.9rem' }}>Telemetry HUD</span>
+                {liveMode && <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#10b981', boxShadow: '0 0 6px #10b981', display: 'inline-block', animation: 'glow-pulse 1.5s infinite' }} />}
+              </div>
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '4px 10px', borderRadius: 6, background: `${modeColor}22`, border: `1px solid ${modeColor}44`, color: modeColor }}>
+                {tel.mode}
+              </span>
+            </div>
+
+            <div style={{ padding: '16px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+              {/* Big alt + groundspeed */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <BigMetric label='Altitude' value={tel.altitude.toFixed(1)} unit='m' color='#00e5ff' />
+                <BigMetric label='Groundspeed' value={tel.groundspeed.toFixed(1)} unit='m/s' color='#10b981' />
+              </div>
+
+              {/* Gauges */}
+              <Gauge label='Battery' value={(tel.battPct ?? 0).toFixed(0)} max={100} unit='%' color='#f59e0b' />
+              <Gauge label='Airspeed' value={tel.airspeed.toFixed(1)} max={20} unit=' m/s' color='#a78bfa' />
+
+              {/* Attitude + Compass row */}
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '10px 0' }}>
+                <AttitudeWidget roll={tel.roll} pitch={tel.pitch} />
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <SmallRow label='Roll'  value={`${tel.roll.toFixed(1)}°`}  color='#f59e0b' />
+                  <SmallRow label='Pitch' value={`${tel.pitch.toFixed(1)}°`} color='#a78bfa' />
+                  <SmallRow label='Hdg'   value={`${tel.heading}°`}           color='#00e5ff' />
+                </div>
+                <Compass heading={tel.heading} />
+              </div>
+
+              {/* Battery voltage */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <MetricCell
+                  label='Battery Voltage'
+                  value={tel.battVolt != null ? `${tel.battVolt.toFixed(2)} V` : '-- V'}
+                  color='#f59e0b'
+                />
+                <MetricCell
+                  label='GPS Fix'
+                  value={gpsFixed ? `3D FIX` : `SEARCH`}
+                  color={gpsFixed ? '#10b981' : '#f59e0b'}
+                  sub={`${tel.satellites} sats`}
+                />
+              </div>
+
+              {/* GPS coords */}
+              <div style={{ padding: '8px 12px', borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.05)', fontFamily: 'var(--mono)', fontSize: '0.72rem' }}>
+                <span style={{ color: gpsFixed ? '#10b981' : '#f59e0b', fontWeight: 700 }}>
+                  {gpsFixed ? '📍 GPS LOCKED' : '🔍 Searching...'}
+                </span>
+                <div style={{ color: '#64748b', marginTop: 3 }}>
+                  {tel.lat?.toFixed(6) ?? '--'} , {tel.lon?.toFixed(6) ?? '--'}
+                </div>
+              </div>
+
+              {/* Drone status */}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ padding: '4px 10px', borderRadius: 20, fontSize: '0.7rem', fontWeight: 700, background: tel.armed ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.1)', border: `1px solid ${tel.armed ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.2)'}`, color: tel.armed ? '#ef4444' : '#10b981' }}>
+                  {tel.armed ? '⚡ ARMED' : '🔒 DISARMED'}
+                </span>
+                <span style={{ padding: '4px 10px', borderRadius: 20, fontSize: '0.7rem', fontWeight: 700, background: 'rgba(0,229,255,0.08)', border: '1px solid rgba(0,229,255,0.15)', color: '#00e5ff' }}>
+                  {liveMode ? '📡 LIVE' : '💾 SIM'}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <style>{`
+        @media (max-width: 900px) {
+          #demo .container > div[style*="grid-template-columns"] {
+            grid-template-columns: 1fr !important;
+          }
         }
       `}</style>
-        </section>
-    )
+    </section>
+  )
+}
+
+// ─── Small sub-components ─────────────────────────────────────────────────────
+function StatusPill({ label, value, color }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+      {label}:
+      <span style={{ fontWeight: 700, color }}>{value}</span>
+    </div>
+  )
+}
+
+function BigMetric({ label, value, unit, color }) {
+  return (
+    <div style={{ padding: 14, borderRadius: 12, background: `radial-gradient(circle at 30% 30%, ${color}15, transparent)`, border: `1px solid ${color}30`, textAlign: 'center' }}>
+      <div style={{ fontSize: '1.8rem', fontWeight: 900, color, fontFamily: 'var(--mono)', lineHeight: 1 }}>
+        {value}<span style={{ fontSize: '0.85rem', fontWeight: 400, marginLeft: 2 }}>{unit}</span>
+      </div>
+      <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
+    </div>
+  )
+}
+
+function SmallRow({ label, value, color }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.74rem' }}>
+      <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>{label}</span>
+      <span style={{ color, fontWeight: 700, fontFamily: 'var(--mono)' }}>{value}</span>
+    </div>
+  )
+}
+
+function MetricCell({ label, value, color, sub }) {
+  return (
+    <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.05)', textAlign: 'center' }}>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: '0.95rem', fontWeight: 800, color }}>{value}</div>
+      {sub && <div style={{ fontSize: '0.65rem', color: '#475569', marginTop: 2 }}>{sub}</div>}
+      <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, marginTop: 2 }}>{label}</div>
+    </div>
+  )
 }

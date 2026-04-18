@@ -4,17 +4,20 @@ import time, math
 
 vehicle = None
 
+
 # ---------------- CONNECT ----------------
 def connect_drone(conn="udp:127.0.0.1:14550"):
     global vehicle
     if vehicle is None:
-        print("🔗 Connecting to drone...")
+        print("Connecting to drone...")
         vehicle = connect(conn, wait_ready=True)
-        print("✅ Connected")
+        print("Connected")
     return vehicle
 
+
 def ready():
-    return vehicle and vehicle.is_armable
+    return vehicle is not None and vehicle.is_armable
+
 
 # ---------------- ARM / TAKEOFF ----------------
 def arm():
@@ -23,60 +26,90 @@ def arm():
     while not vehicle.armed:
         time.sleep(1)
 
+
 def arm_and_takeoff(alt):
     arm()
     vehicle.simple_takeoff(alt)
     while vehicle.location.global_relative_frame.alt < alt * 0.95:
         time.sleep(1)
 
+
 # ---------------- LAND / RTL ----------------
 def land():
     vehicle.mode = VehicleMode("LAND")
 
+
 def rtl():
     vehicle.mode = VehicleMode("RTL")
+
 
 def hold():
     vehicle.mode = VehicleMode("BRAKE")
 
+
 def disarm():
     vehicle.armed = False
+
 
 # ---------------- VELOCITY CONTROL ----------------
 def send_velocity(vx, vy, vz, duration=1):
     msg = vehicle.message_factory.set_position_target_local_ned_encode(
-        0, 0, 0,
+        0,
+        0,
+        0,
         mavutil.mavlink.MAV_FRAME_BODY_NED,
         0b0000111111000111,
-        0, 0, 0,
-        vx, vy, vz,
-        0, 0, 0,
-        0, 0
+        0,
+        0,
+        0,
+        vx,
+        vy,
+        vz,
+        0,
+        0,
+        0,
+        0,
+        0,
     )
     for _ in range(duration * 5):
         vehicle.send_mavlink(msg)
         time.sleep(0.2)
 
+
 # ---------------- MOVEMENT ----------------
-def move_forward(d): send_velocity(d, 0, 0)
-def move_backward(d): send_velocity(-d, 0, 0)
-def move_left(d): send_velocity(0, -d, 0)
-def move_right(d): send_velocity(0, d, 0)
-def move_up(d): send_velocity(0, 0, -d)
-def move_down(d): send_velocity(0, 0, d)
+def move_forward(distance):
+    send_velocity(distance, 0, 0)
+
+
+def move_backward(distance):
+    send_velocity(-distance, 0, 0)
+
+
+def move_left(distance):
+    send_velocity(0, -distance, 0)
+
+
+def move_right(distance):
+    send_velocity(0, distance, 0)
+
+
+def move_up(distance):
+    send_velocity(0, 0, -distance)
+
+
+def move_down(distance):
+    send_velocity(0, 0, distance)
+
 
 # ---------------- ROTATION ----------------
 def rotate(deg):
     vehicle.condition_yaw(abs(deg), direction=1 if deg > 0 else -1)
 
+
 # ---------------- EXECUTOR ----------------
 def execute(intent, value=None):
-    intent = intent.upper()
-    print(f"🎯 {intent} {value}")
-
-    if not ready():
-        print("⚠️ Drone not ready")
-        return
+    intent = (intent or "").upper()
+    print(f"Executing {intent} {value}")
 
     actions = {
         "ARM": arm,
@@ -96,7 +129,27 @@ def execute(intent, value=None):
     }
 
     action = actions.get(intent)
-    if action:
+    if action is None:
+        detail = "Unknown command"
+        print(detail)
+        return {"execution": "failed", "detail": detail}
+
+    if vehicle is None:
+        detail = "Drone not connected"
+        print(detail)
+        return {"execution": "failed", "detail": detail}
+
+    if not ready() and intent not in {"LAND", "RTL", "HOLD", "DISARM"}:
+        detail = "Drone not ready"
+        print(detail)
+        return {"execution": "failed", "detail": detail}
+
+    try:
         action()
-    else:
-        print("❌ Unknown command")
+        detail = f"{intent} executed"
+        print(detail)
+        return {"execution": "success", "detail": detail}
+    except Exception as exc:
+        detail = str(exc)
+        print(f"Drone execution error: {detail}")
+        return {"execution": "failed", "detail": detail}

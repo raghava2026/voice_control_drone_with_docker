@@ -3,15 +3,17 @@ FROM python:3.9-slim
 RUN apt-get update && apt-get install -y \
     git build-essential portaudio19-dev \
     python3-dev libsndfile1 ffmpeg curl \
+    pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY server.py drone_control.py drone_takeoff.py \
-     nlp_module.py commands_map.py stt_module.py \
-     speech.html mav.parm ./
+COPY app ./app
+COPY drone_control.py ./
+COPY speech.html mav.parm ./
 
-RUN pip install --upgrade pip && pip install \
+RUN pip install --upgrade pip wheel
+RUN pip install \
     future \
     fastapi==0.103.2 \
     uvicorn==0.23.2 \
@@ -23,13 +25,13 @@ RUN pip install --upgrade pip && pip install \
     requests==2.31.0 \
     python-dotenv==1.0.0 \
     websockets==11.0.3 \
-    numpy==1.26.4 \
     psutil==5.9.8 \
-    spacy==3.7.4
+    faster-whisper==1.1.1
 
-RUN pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl || \
-    pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl || \
-    python -m spacy download en_core_web_sm
+ENV WHISPER_MODEL=base
+ENV WHISPER_DEVICE=cpu
+ENV WHISPER_COMPUTE_TYPE=int8
+ENV WHISPER_BEAM_SIZE=1
 
 EXPOSE 8002
-CMD ["python", "server.py"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8002"]

@@ -102,3 +102,6 @@ vosk==0.3.45
 websockets==15.0.1
 yacs==0.1.8
 yacs-stubgen==0.3.0
+fastapi==0.103.2
+uvicorn==0.23.2
+python-multipart==0.0.6
